@@ -71,7 +71,6 @@
     <small>Demo build • Daffodil Hackathon •v1.0</small>
   </footer>
 
-  <!-- Link app.js here! -->
   <script src="App.js" defer></script>
 </body>
 </html>
