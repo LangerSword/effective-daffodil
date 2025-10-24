@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Daffodil – Sign Translator</title>
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header role="banner" class="site-header">
+    <div class="header-inner">
+      <h1 class="brand">Daffodil</h1>
+      <p class="tagline">Real-time sign ↔ speech bridge</p>
+      <nav aria-label="Primary" class="top-nav">
+        <button id="themeToggle" aria-pressed="false" aria-label="Toggle theme">Light Mode</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" role="main">
+    <section class="grid">
+      <section class="panel camera" aria-labelledby="cameraTitle">
+        <div class="panel-head">
+          <h2 id="cameraTitle">Camera</h2>
+          <span id="camStatus" class="chip" aria-live="polite">Waiting for camera…</span>
+        </div>
+        <div class="media">
+          <video id="video" autoplay playsinline muted aria-label="Webcam preview"></video>
+        </div>
+        <div class="help">
+          <p class="muted">Tip: Allow camera permission.</p>
+        </div>
+      </section>
+
+      <section class="panel output" aria-labelledby="outputTitle">
+        <div class="panel-head">
+          <h2 id="outputTitle">Recognized output</h2>
+        </div>
+        <div class="kv">
+          <div class="k">Gesture</div>
+          <div class="v" id="gestureName">—</div>
+        </div>
+        <div class="kv">
+          <div class="k">Phrase</div>
+          <div class="v" id="mappedPhrase">—</div>
+        </div>
+        <div class="actions">
+          <button id="speakBtn" class="primary" disabled aria-disabled="true">Play voice</button>
+        </div>
+        <div id="ticker" class="ticker" aria-live="polite" aria-relevant="additions"></div>
+      </section>
+
+      <section class="panel speech" aria-labelledby="speechTitle">
+        <div class="panel-head">
+          <h2 id="speechTitle">Speech to text</h2>
+        </div>
+        <div class="actions">
+          <button id="startMic" class="primary">Start recording</button>
+          <button id="stopMic" class="danger" disabled aria-disabled="true">Stop</button>
+        </div>
+        <label class="muted" for="transcript">Transcript</label>
+        <textarea id="transcript" rows="5" placeholder="Transcript appears here…" readonly></textarea>
+      </section>
+    </section>
+  </main>
+
+  <footer role="contentinfo" class="site-footer">
+    <small>Demo build • Daffodil Hackathon •v1.0</small>
+  </footer>
+
+  <!-- Link app.js here! -->
+  <script src="App.js" defer></script>
+</body>
+</html>

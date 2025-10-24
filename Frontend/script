@@ -1,0 +1,179 @@
+// Daffodil Frontend — App.js
+
+const els = {
+  video: document.getElementById('video'),
+  camStatus: document.getElementById('camStatus'),
+  gestureName: document.getElementById('gestureName'),
+  mappedPhrase: document.getElementById('mappedPhrase'),
+  speakBtn: document.getElementById('speakBtn'),
+  startMic: document.getElementById('startMic'),
+  stopMic: document.getElementById('stopMic'),
+  transcript: document.getElementById('transcript'),
+  ticker: document.getElementById('ticker'),
+  themeToggle: document.getElementById('themeToggle'),
+};
+
+let mediaRecorder = null;
+let audioChunks = [];
+let speakingPhrase = '';
+let pollTimer = null;
+
+function setCamStatus(text) {
+  if (els.camStatus) els.camStatus.textContent = text;
+}
+
+// -- Theme toggle fixed --
+(function setupThemeToggle() {
+  const btn = els.themeToggle;
+  const html = document.documentElement;
+  const THEME_KEY = 'theme:mode';
+  function applyTheme(isLight) {
+    html.setAttribute('data-theme', isLight ? 'light' : 'dark');
+    btn.textContent = isLight ? 'Dark Mode' : 'Light Mode';
+    btn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+  }
+  let isLight = localStorage.getItem(THEME_KEY) === 'light';
+  applyTheme(isLight);
+  btn.addEventListener('click', function() {
+    isLight = !isLight;
+    localStorage.setItem(THEME_KEY, isLight ? 'light' : 'dark');
+    applyTheme(isLight);
+  });
+})();
+
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    els.video.srcObject = stream;
+    setCamStatus('Camera ready');
+  } catch (e) {
+    console.error(e);
+    setCamStatus('Camera blocked. Enable permissions.');
+  }
+}
+
+function enableMicButtons(startEnabled) {
+  els.startMic.disabled = !startEnabled;
+  els.stopMic.disabled = startEnabled;
+  els.stopMic.setAttribute('aria-disabled', String(startEnabled));
+}
+
+async function startMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) audioChunks.push(e.data);
+    };
+    mediaRecorder.onstop = onMicStop;
+    mediaRecorder.start(150);
+    enableMicButtons(false);
+  } catch (e) {
+    alert('Microphone blocked. Allow mic to use speech-to-text.');
+    console.error(e);
+  }
+}
+
+function stopMic() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    if (mediaRecorder.stream) {
+      mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    }
+  }
+}
+
+async function onMicStop() {
+  try {
+    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    const form = new FormData();
+    form.append('audio', blob, 'audio.webm');
+    const res = await fetch('/api/speech-to-text', { method: 'POST', body: form });
+    if (!res.ok) throw new Error('speech-to-text failed');
+    const data = await res.json();
+    els.transcript.value = data.text || '(no speech detected)';
+  } catch (e) {
+    console.error(e);
+    els.transcript.value = '(speech service unavailable)';
+  } finally {
+    enableMicButtons(true);
+  }
+}
+
+function appendTicker(text) {
+  if (!els.ticker || !text) return;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const line = document.createElement('div');
+  line.textContent = `[${time}] ${text}`;
+  els.ticker.prepend(line);
+  const max = 30;
+  while (els.ticker.children.length > max) {
+    els.ticker.removeChild(els.ticker.lastChild);
+  }
+}
+
+async function pollRecognition() {
+  try {
+    const res = await fetch('/api/recognition', { cache: 'no-store' });
+    if (!res.ok) throw new Error('recognition failed');
+    const data = await res.json();
+    if (data.gesture) els.gestureName.textContent = data.gesture;
+    if (data.phrase) {
+      if (els.mappedPhrase.textContent !== data.phrase) {
+        appendTicker(data.phrase);
+      }
+      els.mappedPhrase.textContent = data.phrase;
+      speakingPhrase = data.phrase;
+      els.speakBtn.disabled = false;
+      els.speakBtn.setAttribute('aria-disabled', 'false');
+    }
+  } catch (e) {
+    // Silent retry
+  } finally {
+    pollTimer = setTimeout(pollRecognition, 400);
+  }
+}
+
+async function playVoice() {
+  if (!speakingPhrase) return;
+  try {
+    const res = await fetch('/api/text-to-speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: speakingPhrase })
+    });
+    if (!res.ok) throw new Error('text-to-speech failed');
+    const arrayBuf = await res.arrayBuffer();
+    const blob = new Blob([arrayBuf], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play();
+  } catch (e) {
+    alert('Voice service unavailable');
+    console.error(e);
+  }
+}
+
+function setupShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (els.startMic.disabled) stopMic(); else startMic();
+    } else if (e.code === 'Enter') {
+      e.preventDefault();
+      playVoice();
+    }
+  });
+}
+
+function init() {
+  initCamera();
+  pollRecognition();
+  els.speakBtn.addEventListener('click', playVoice);
+  els.startMic.addEventListener('click', startMic);
+  els.stopMic.addEventListener('click', stopMic);
+  setupShortcuts();
+}
+
+document.addEventListener('DOMContentLoaded', init);
