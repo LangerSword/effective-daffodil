@@ -1,1 +1,246 @@
+import random
+import time
+from flask import Flask, render_template, Response, jsonify, request
+from flask_cors import CORS
+import json
+import base64
+from io import BytesIO
 
+# --- Global Variables for State Management ---
+latest_gesture = "None"
+last_gesture_time = 0
+GESTURE_COOLDOWN = 2  # seconds
+
+# --- Gesture to Text Mapping ---
+gesture_map = {
+    "Victory": "Hello, welcome to Daffodil!",
+    "Thumb_Up": "Yes, that sounds great!",
+    "Closed_Fist": "No, thank you.",
+    "Pointing_Up": "I have a question.",
+    "ILoveYou": "I love you.",
+    "Open_Palm": "Hello there!",
+    "Thumb_Down": "I don't like that."
+}
+
+# --- Simulated Gesture Recognition ---
+def simulate_gesture_recognition():
+    """Simulate gesture detection without camera"""
+    global latest_gesture, last_gesture_time
+    current_time = time.time()
+    
+    # Simulate random gesture detection every 5-10 seconds
+    if current_time - last_gesture_time > random.randint(5, 10):
+        gestures = list(gesture_map.keys())
+        detected_gesture = random.choice(gestures)
+        latest_gesture = detected_gesture
+        last_gesture_time = current_time
+        print(f"Simulated gesture recognized: {latest_gesture}")
+
+# --- Manual Gesture Input ---
+manual_gestures = []
+
+# --- Flask App Setup ---
+app = Flask(__name__)
+CORS(app)
+
+# --- Generate Simulated Video Feed ---
+def generate_simulated_frames():
+    """Generate a simulated video feed with gesture information"""
+    while True:
+        # Simulate gesture recognition
+        simulate_gesture_recognition()
+        
+        # Create a simple JSON frame instead of image
+        frame_data = {
+            "timestamp": time.time(),
+            "gesture": latest_gesture,
+            "gesture_text": gesture_map.get(latest_gesture, "No gesture"),
+            "available_gestures": list(gesture_map.keys())
+        }
+        
+        # Convert to JSON and yield as frame
+        frame_json = json.dumps(frame_data)
+        yield f"data: {frame_json}\n\n"
+        time.sleep(0.1)  # 10 FPS
+
+# --- Routes ---
+@app.route('/')
+def index():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Gesture Recognition Simulator</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .video-placeholder { 
+                background: #f0f0f0; 
+                padding: 100px; 
+                text-align: center; 
+                border: 2px dashed #ccc;
+                margin: 20px 0;
+            }
+            .gesture-info { 
+                background: #e8f5e8; 
+                padding: 20px; 
+                margin: 10px 0;
+                border-radius: 5px;
+            }
+            .controls { margin: 20px 0; }
+            button { 
+                padding: 10px 15px; 
+                margin: 5px; 
+                background: #007cba; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                cursor: pointer;
+            }
+            button:hover { background: #005a87; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎭 Gesture Recognition Simulator</h1>
+            <p>This is a simulated version that doesn't require OpenCV or camera access.</p>
+            
+            <div class="video-placeholder">
+                <h2>📷 Simulated Camera Feed</h2>
+                <p>Gesture detection is running in simulation mode</p>
+                <div id="gesture-display"></div>
+            </div>
+            
+            <div class="controls">
+                <h3>Manual Gesture Input</h3>
+                <div id="gesture-buttons"></div>
+            </div>
+            
+            <div class="gesture-info">
+                <h3>Current Gesture: <span id="current-gesture">None</span></h3>
+                <p>Mapped Text: <span id="mapped-text">No gesture detected</span></p>
+            </div>
+            
+            <div class="controls">
+                <button onclick="triggerTTS()">🔊 Speak Current Gesture</button>
+                <button onclick="addManualGesture()">➕ Add Random Gesture</button>
+            </div>
+        </div>
+
+        <script>
+            // Display available gesture buttons
+            const gestures = """ + json.dumps(list(gesture_map.keys())) + """;
+            const gestureButtons = document.getElementById('gesture-buttons');
+            
+            gestures.forEach(gesture => {
+                const btn = document.createElement('button');
+                btn.textContent = gesture;
+                btn.onclick = () => setManualGesture(gesture);
+                gestureButtons.appendChild(btn);
+            });
+            
+            // SSE connection for simulated video feed
+            const eventSource = new EventSource('/video_feed');
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                document.getElementById('current-gesture').textContent = data.gesture;
+                document.getElementById('mapped-text').textContent = data.gesture_text;
+                
+                // Update gesture display
+                const display = document.getElementById('gesture-display');
+                display.innerHTML = `<h3>${data.gesture}</h3><p>${data.gesture_text}</p>`;
+            };
+            
+            function setManualGesture(gesture) {
+                fetch('/set_gesture', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gesture: gesture })
+                });
+            }
+            
+            function triggerTTS() {
+                const currentGesture = document.getElementById('current-gesture').textContent;
+                if (currentGesture !== 'None') {
+                    fetch('/sign_to_speech', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gesture: currentGesture })
+                    });
+                }
+            }
+            
+            function addManualGesture() {
+                const randomGesture = gestures[Math.floor(Math.random() * gestures.length)];
+                setManualGesture(randomGesture);
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+@app.route('/video_feed')
+def video_feed():
+    """Server-Sent Events for simulated video feed"""
+    return Response(generate_simulated_frames(), mimetype='text/event-stream')
+
+@app.route('/get_latest_gesture')
+def get_latest_gesture():
+    global latest_gesture
+    return jsonify({
+        'gesture': latest_gesture,
+        'text': gesture_map.get(latest_gesture, "No gesture"),
+        'timestamp': time.time()
+    })
+
+@app.route('/set_gesture', methods=['POST'])
+def set_gesture():
+    """Manually set a gesture (for testing)"""
+    global latest_gesture, last_gesture_time
+    data = request.get_json()
+    gesture = data.get('gesture')
+    
+    if gesture in gesture_map:
+        latest_gesture = gesture
+        last_gesture_time = time.time()
+        print(f"Manual gesture set: {latest_gesture}")
+    
+    return jsonify({'status': 'success', 'gesture': latest_gesture})
+
+@app.route('/sign_to_speech', methods=['POST'])
+def sign_to_speech():
+    """Simulated TTS - returns JSON instead of audio"""
+    data = request.get_json()
+    gesture = data.get('gesture')
+    
+    text_to_speak = gesture_map.get(gesture, "I don't recognize that sign.")
+    
+    # Simulate TTS by returning the text
+    print(f"TTS would speak: '{text_to_speak}'")
+    
+    return jsonify({
+        'status': 'success', 
+        'text': text_to_speak,
+        'message': 'In a real implementation, this would return audio'
+    })
+
+@app.route('/get_gesture_map')
+def get_gesture_map():
+    """Get all available gestures"""
+    return jsonify(gesture_map)
+
+@app.route('/add_gesture', methods=['POST'])
+def add_gesture():
+    """Add a custom gesture mapping"""
+    data = request.get_json()
+    gesture = data.get('gesture')
+    text = data.get('text')
+    
+    if gesture and text:
+        gesture_map[gesture] = text
+        return jsonify({'status': 'success', 'gesture_map': gesture_map})
+    
+    return jsonify({'status': 'error', 'message': 'Invalid gesture or text'})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
