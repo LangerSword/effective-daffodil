@@ -1,0 +1,126 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import time
+from flask import Flask, render_template, Response, jsonify, request
+from flask_cors import CORS
+from google.cloud import texttospeech, speech
+
+# --- Global Variables for State Management ---
+latest_gesture = "None"
+last_gesture_time = 0
+GESTURE_COOLDOWN = 2  # seconds
+
+# --- MediaPipe Setup ---
+BaseOptions = mp.tasks.BaseOptions
+GestureRecognizer = mp.tasks.vision.GestureRecognizer
+GestureRecognizerOptions = mp.tasks.vision.GestureRecognizerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
+
+# --- Google Cloud Client Initialization ---
+tts_client = texttospeech.TextToSpeechClient()
+speech_client = speech.SpeechClient()
+
+# --- Gesture to Text Mapping ---
+gesture_map = {
+    "Victory": "Hello, welcome to Daffodil!",
+    "Thumb_Up": "Yes, that sounds great!",
+    "Closed_Fist": "No, thank you.",
+    "Pointing_Up": "I have a question.",
+    "ILoveYou": "I love you."
+}
+
+# Callback function to handle gesture recognition results
+def print_result(result, output_image, timestamp_ms: int):
+    global latest_gesture, last_gesture_time
+    current_time = time.time()
+    
+    if result.gestures and (current_time - last_gesture_time > GESTURE_COOLDOWN):
+        top_gesture = result.gestures[0][0]
+        
+        if top_gesture.score > 0.6:
+            latest_gesture = top_gesture.category_name
+            last_gesture_time = current_time
+            print(f"Gesture recognized: {latest_gesture}")
+
+# Create gesture recognizer
+options = GestureRecognizerOptions(
+    base_options=BaseOptions(model_asset_path='gesture_recognizer.task'),
+    running_mode=VisionRunningMode.LIVE_STREAM,
+    result_callback=print_result
+)
+recognizer = GestureRecognizer.create_from_options(options)
+
+# --- Flask App Setup ---
+app = Flask(__name__)
+CORS(app)
+camera = cv2.VideoCapture(0)
+
+# --- Frame Generation ---
+def generate_frames():
+    frame_timestamp_ms = 0
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+        
+        frame_timestamp_ms = int(time.time() * 1000)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        
+        recognizer.recognize_async(mp_image, frame_timestamp_ms)
+        
+        cv2.putText(frame, f"Gesture: {latest_gesture}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+# --- Routes ---
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/get_latest_gesture')
+def get_latest_gesture():
+    global latest_gesture
+    gesture_to_send = latest_gesture
+    if gesture_to_send != "None":
+        latest_gesture = "None"
+    return jsonify({'gesture': gesture_to_send})
+
+@app.route('/sign_to_speech', methods=['POST'])
+def sign_to_speech():
+    """Receives a gesture, maps it to text, and returns synthesized speech audio."""
+    data = request.get_json()
+    gesture = data.get('gesture')
+    
+    text_to_speak = gesture_map.get(gesture, "I don't recognize that sign.")
+    
+    synthesis_input = texttospeech.SynthesisInput(text=text_to_speak)
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US",
+        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+    )
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
+    
+    response = tts_client.synthesize_speech(
+        input=synthesis_input,
+        voice=voice,
+        audio_config=audio_config
+    )
+    
+    return Response(response.audio_content, mimetype='audio/mpeg')
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
