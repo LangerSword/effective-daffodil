@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daffodil Project (Simple Demo)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #1c1e21;
+        }
+      .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            width: 100%;
+            max-width: 680px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        h1 {
+            font-size: 28px;
+            border-bottom: 1px solid #dddfe2;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        #video-container {
+            position: relative;
+            width: 100%;
+            padding-top: 75%; /* 4:3 Aspect Ratio */
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        video, #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        video {
+            transform: scaleX(-1); /* Mirror view for a natural feel */
+        }
+      .output-box {
+            margin-top: 20px;
+            background-color: #f0f2f5;
+            padding: 15px;
+            border-radius: 6px;
+            min-height: 50px;
+            border: 1px solid #dddfe2;
+        }
+      .output-box p {
+            margin: 0;
+            font-size: 24px;
+            font-weight: bold;
+            color: #1877f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Daffodil Gesture Recognition</h1>
+        <div id="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+        <div class="output-box">
+            <p id="gesture_output">Please allow camera access...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import {
+            GestureRecognizer,
+            FilesetResolver,
+            DrawingUtils
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+        const video = document.getElementById("webcam");
+        const canvasElement = document.getElementById("output_canvas");
+        const canvasCtx = canvasElement.getContext("2d");
+        const gestureOutput = document.getElementById("gesture_output");
+
+        let gestureRecognizer;
+        let lastSpokenGesture = "";
+        let lastSpokenTime = 0;
+
+        // This function sets up the AI model
+        const createGestureRecognizer = async () => {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 1
+            });
+            gestureOutput.innerText = "Ready! Show me a gesture.";
+        };
+        createGestureRecognizer();
+
+        // This function turns on the webcam
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+            video.srcObject = stream;
+            video.addEventListener("loadeddata", predictWebcam);
+        });
+
+        // This is the main loop that runs continuously
+        async function predictWebcam() {
+            if (!gestureRecognizer) {
+                window.requestAnimationFrame(predictWebcam);
+                return;
+            }
+            
+            canvasElement.width = video.videoWidth;
+            canvasElement.height = video.videoHeight;
+
+            const results = gestureRecognizer.recognizeForVideo(video, Date.now());
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            const drawingUtils = new DrawingUtils(canvasCtx);
+            if (results.landmarks) {
+                for (const landmarks of results.landmarks) {
+                    drawingUtils.drawConnectors(landmarks, GestureRecognizer.HAND_CONNECTIONS, { color: "#00FF00", lineWidth: 5 });
+                    drawingUtils.drawLandmarks(landmarks, { color: "#FF0000", lineWidth: 2 });
+                }
+            }
+            canvasCtx.restore();
+
+            if (results.gestures.length > 0) {
+                const categoryName = results.gestures.categoryName;
+                const categoryScore = parseFloat(results.gestures.score * 100).toFixed(2);
+                
+                gestureOutput.innerText = `${categoryName} (${categoryScore}%)`;
+
+                const currentTime = Date.now();
+                if (categoryName!== "None" && categoryName!== lastSpokenGesture && (currentTime - lastSpokenTime > 3000)) {
+                    speakGesture(categoryName);
+                    lastSpokenGesture = categoryName;
+                    lastSpokenTime = currentTime;
+                }
+            } else {
+                gestureOutput.innerText = "No gesture detected";
+                lastSpokenGesture = "";
+            }
+
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        function speakGesture(gesture) {
+            const gestureMap = {
+                "Victory": "Hello there!",
+                "Thumb_Up": "Yes, I agree.",
+                "Closed_Fist": "Stop.",
+                "Pointing_Up": "I have a question.",
+                "ILoveYou": "I love you."
+            };
+
+            const textToSpeak = gestureMap[gesture];
+            if (textToSpeak) {
+                const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+    </script>
+</body>
+</html>
