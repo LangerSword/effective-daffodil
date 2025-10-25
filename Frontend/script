@@ -168,6 +168,7 @@ function setupShortcuts() {
 }
 
 function init() {
+  console.log("Initializing Daffodil app...");
   initCamera();
   pollRecognition();
   els.speakBtn.addEventListener('click', playVoice);
@@ -176,4 +177,6 @@ function init() {
   setupShortcuts();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// ✅ Directly call init(), since <script> uses 'defer' and DOM is already ready
+init();
+
